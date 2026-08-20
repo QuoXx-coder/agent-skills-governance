@@ -62,6 +62,8 @@ Dir.mktmpdir("agent-skills-host-exception-test") do |root|
   }
   registry_path = File.join(root, "registry.yaml")
   File.write(registry_path, YAML.dump(registry))
+  FileUtils.mkdir_p(File.join(public_skill, ".git"))
+  File.write(File.join(public_skill, ".git", "HEAD"), "ref: refs/heads/main\n")
 
   bin = File.join(root, "bin")
   marker = File.join(root, "codex-invoked")
@@ -97,7 +99,11 @@ Dir.mktmpdir("agent-skills-host-exception-test") do |root|
   raise "explicit Codex check did not invoke codex" unless File.exist?(marker)
   raise "unexpected Codex check arguments" unless File.read(marker) == "app-server --strict-config --stdio"
 
-  duplicate = JSON.parse(stdout).fetch("issues").find { |issue| issue["code"] == "duplicate-real-skill" }
+  issues = JSON.parse(stdout).fetch("issues")
+  hash_drift = issues.find { |issue| issue["code"] == "content-hash-drift" }
+  raise "Git metadata must not cause a hash drift: #{hash_drift}" if hash_drift
+
+  duplicate = issues.find { |issue| issue["code"] == "duplicate-real-skill" }
   raise "host exception must suppress duplicate-real-skill: #{duplicate}" if duplicate
 end
 

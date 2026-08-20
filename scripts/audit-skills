@@ -12,6 +12,7 @@ require "yaml"
 HOSTS = %w[codex claude cursor qoder workbuddy].freeze
 DIRECT_CANONICAL_READERS = %w[codex cursor].freeze
 IGNORED_CONTENT = %w[.DS_Store].freeze
+IGNORED_CONTENT_DIRECTORIES = %w[.git].freeze
 RESIDUAL_DIRS = %w[__pycache__].freeze
 RESIDUAL_SUFFIXES = %w[.pyc].freeze
 
@@ -67,12 +68,15 @@ end
 def content_hash(root)
   prefix = File.expand_path(root) + File::SEPARATOR
   rows = Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH)
-    .select { |path| File.file?(path) && !IGNORED_CONTENT.include?(File.basename(path)) }
+    .select { |path| File.file?(path) }
     .sort_by { |path| File.expand_path(path).delete_prefix(prefix) }
     .map do |path|
       relative = File.expand_path(path).delete_prefix(prefix)
+      next if IGNORED_CONTENT.include?(File.basename(path))
+      next if relative.split(File::SEPARATOR).any? { |segment| IGNORED_CONTENT_DIRECTORIES.include?(segment) }
+
       "#{relative}\0#{Digest::SHA256.file(path).hexdigest}\n"
-    end
+    end.compact
   Digest::SHA256.hexdigest(rows.join)
 end
 
