@@ -1,0 +1,299 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "digest"
+require "find"
+require "json"
+require "open3"
+require "optparse"
+require "pathname"
+require "yaml"
+
+HOSTS = %w[codex claude cursor qoder workbuddy].freeze
+DIRECT_CANONICAL_READERS = %w[codex cursor].freeze
+IGNORED_CONTENT = %w[.DS_Store].freeze
+RESIDUAL_DIRS = %w[__pycache__].freeze
+RESIDUAL_SUFFIXES = %w[.pyc].freeze
+
+options = {
+  format: "text",
+  strict: false,
+  home: Dir.home,
+  registry: File.join(Dir.home, ".agents", "skills-registry.yaml"),
+  canonical_root: File.join(Dir.home, ".agents", "skills"),
+  temp_root: "/private/tmp",
+  codex_checks: false
+}
+
+OptionParser.new do |parser|
+  parser.banner = "Usage: audit-skills [options]"
+  parser.on("--format FORMAT", %w[text json], "text or json") { |value| options[:format] = value }
+  parser.on("--strict", "exit non-zero when errors or warnings exist") { options[:strict] = true }
+  parser.on("--home PATH", "override the user home used for host roots") { |value| options[:home] = File.expand_path(value) }
+  parser.on("--registry PATH", "override the registry path") { |value| options[:registry] = File.expand_path(value) }
+  parser.on("--canonical-root PATH", "override the canonical global root") { |value| options[:canonical_root] = File.expand_path(value) }
+  parser.on("--temp-root PATH", "override the temporary root") { |value| options[:temp_root] = File.expand_path(value) }
+  parser.on("--check-codex-config", "run current Codex CLI/config validation") { options[:codex_checks] = true }
+  parser.on("--skip-codex-checks", "skip current Codex CLI/config validation") { options[:codex_checks] = false }
+end.parse!
+
+issues = []
+
+def add_issue(issues, severity, code, message, path = nil, suggestion = nil)
+  issues << {
+    "severity" => severity,
+    "code" => code,
+    "message" => message,
+    "path" => path,
+    "suggestion" => suggestion
+  }.compact
+end
+
+def load_yaml(path)
+  YAML.safe_load(File.read(path), permitted_classes: [Time], aliases: false)
+end
+
+def skill_frontmatter(path)
+  content = File.read(path, encoding: "UTF-8")
+  match = content.match(/\A---\r?\n(.*?)\r?\n---(?:\r?\n|\z)/m)
+  raise "missing YAML frontmatter" unless match
+
+  data = YAML.safe_load(match[1], permitted_classes: [], aliases: false)
+  raise "frontmatter is not a mapping" unless data.is_a?(Hash)
+
+  data
+end
+
+def content_hash(root)
+  prefix = File.expand_path(root) + File::SEPARATOR
+  rows = Dir.glob(File.join(root, "**", "*"), File::FNM_DOTMATCH)
+    .select { |path| File.file?(path) && !IGNORED_CONTENT.include?(File.basename(path)) }
+    .sort_by { |path| File.expand_path(path).delete_prefix(prefix) }
+    .map do |path|
+      relative = File.expand_path(path).delete_prefix(prefix)
+      "#{relative}\0#{Digest::SHA256.file(path).hexdigest}\n"
+    end
+  Digest::SHA256.hexdigest(rows.join)
+end
+
+def host_roots(home)
+  HOSTS.to_h { |host| [host, File.join(home, ".#{host}", "skills")] }
+end
+
+def symlink_target(path)
+  File.realpath(path)
+rescue Errno::ENOENT, Errno::ELOOP
+  nil
+end
+
+def each_symlink(root)
+  return enum_for(__method__, root) unless block_given?
+  return unless File.directory?(root)
+
+  Find.find(root) do |path|
+    if File.symlink?(path)
+      yield path
+      Find.prune if File.directory?(path)
+    end
+  rescue Errno::ENOENT, Errno::EACCES
+    next
+  end
+end
+
+registry_path = options[:registry]
+unless File.file?(registry_path)
+  add_issue(issues, "error", "registry-missing", "统一注册表不存在。", registry_path, "恢复或重建注册表后重新巡检。")
+  registry = { "skills" => [] }
+else
+  begin
+    registry = load_yaml(registry_path)
+    raise "registry root is not a mapping" unless registry.is_a?(Hash)
+    raise "skills is not an array" unless registry["skills"].is_a?(Array)
+  rescue StandardError => e
+    add_issue(issues, "error", "registry-invalid", "统一注册表无法解析：#{e.message}", registry_path, "修复 YAML 后重新巡检。")
+    registry = { "skills" => [] }
+  end
+end
+
+skills = registry.fetch("skills", [])
+duplicate_names = skills.group_by { |entry| entry["name"] }.select { |name, entries| name.nil? || entries.length > 1 }
+duplicate_names.each do |name, entries|
+  add_issue(issues, "error", "registry-duplicate-name", "注册表名称不唯一：#{name.inspect}（#{entries.length} 条）。", registry_path, "合并或重新命名冲突条目。")
+end
+
+roots = host_roots(options[:home])
+canonical_root = File.expand_path(options[:canonical_root])
+host_exception_paths = {}
+skills.each do |entry|
+  name = entry["name"].to_s
+  targets = Array(entry["targets"]).map(&:to_s)
+  exceptions = entry["host_exceptions"].is_a?(Hash) ? entry["host_exceptions"].transform_keys(&:to_s) : {}
+  targets.each do |host|
+    next unless roots.key?(host)
+    exception = exceptions[host]
+    next unless exception && !exception.to_s.strip.empty?
+
+    host_exception_paths[File.expand_path(File.join(roots[host], name))] = true
+  end
+end
+
+skills.each do |entry|
+  name = entry["name"].to_s
+  source = File.expand_path(entry["source_path"].to_s)
+  scope = entry["scope"].to_s
+  targets = Array(entry["targets"]).map(&:to_s)
+  exceptions = entry["host_exceptions"].is_a?(Hash) ? entry["host_exceptions"].transform_keys(&:to_s) : {}
+
+  unless File.directory?(source)
+    add_issue(issues, "error", "source-missing", "Skill 真源不存在。", source, "恢复真源或从注册表移除失效条目。")
+    next
+  end
+
+  marker = File.join(source, "SKILL.md")
+  unless File.file?(marker)
+    add_issue(issues, "error", "skill-marker-missing", "真源缺少 SKILL.md。", source, "恢复合法的 Skill 入口文件。")
+    next
+  end
+
+  begin
+    frontmatter = skill_frontmatter(marker)
+    fm_name = frontmatter["name"]
+    description = frontmatter["description"]
+    add_issue(issues, "error", "frontmatter-name-mismatch", "frontmatter name=#{fm_name.inspect}，注册表 name=#{name.inspect}。", marker, "统一目录名、frontmatter 和注册表名称。") unless fm_name == name
+    add_issue(issues, "error", "frontmatter-description-invalid", "description 缺失或不是非空字符串。", marker, "补充说明用途与触发场景的 description。") unless description.is_a?(String) && !description.strip.empty?
+    add_issue(issues, "error", "directory-name-mismatch", "真源目录名与 Skill name 不一致。", source, "统一目录名与 frontmatter name。") unless File.basename(source) == name
+  rescue StandardError => e
+    add_issue(issues, "error", "frontmatter-invalid", "SKILL.md frontmatter 无法解析：#{e.message}", marker, "修复 frontmatter 后重新巡检。")
+  end
+
+  expected_hash = entry["content_sha256"].to_s
+  actual_hash = content_hash(source)
+  unless expected_hash == actual_hash
+    add_issue(issues, "error", "content-hash-drift", "内容哈希与注册表不一致；expected=#{expected_hash} actual=#{actual_hash}。", source, "确认变更来源后更新注册表或恢复内容。")
+  end
+
+  targets.each do |host|
+    next unless roots.key?(host)
+    exception = exceptions[host]
+    if exception && !exception.to_s.strip.empty?
+      add_issue(issues, "info", "host-exception", "#{host} 使用已登记的宿主例外：#{exception}", source)
+      next
+    end
+
+    entry_path = File.join(roots[host], name)
+    if scope == "host" && File.expand_path(entry_path) == source
+      unless File.directory?(entry_path) && !File.symlink?(entry_path)
+        add_issue(issues, "error", "host-source-invalid", "#{host} 宿主专属真源不是预期的真实目录。", entry_path, "恢复宿主专属真源或修正注册表。")
+      end
+      next
+    end
+
+    if scope == "global" && DIRECT_CANONICAL_READERS.include?(host)
+      if File.symlink?(entry_path)
+        add_issue(issues, "warning", "redundant-direct-reader-link", "#{host} 可直接读取公共真源，但仍存在冗余软链接。", entry_path, "确认宿主发现机制后移除冗余入口。")
+      elsif File.exist?(entry_path)
+        add_issue(issues, "error", "duplicate-real-directory", "#{host} 存在与公共真源同名的真实目录。", entry_path, "比较内容并在确认后迁出重复目录。")
+      end
+      next
+    end
+
+    unless File.symlink?(entry_path)
+      kind = File.exist?(entry_path) ? "真实目录或文件" : "缺失"
+      add_issue(issues, "error", "host-entry-invalid", "#{host} 的入口#{kind}，预期为指向真源的软链接。", entry_path, "建立指向 #{source} 的软链接。")
+      next
+    end
+
+    actual_target = symlink_target(entry_path)
+    unless actual_target == File.realpath(source)
+      add_issue(issues, "error", "host-entry-wrong-target", "#{host} 入口没有指向登记真源。", entry_path, "更新软链接到 #{source}。")
+    end
+  end
+
+  Find.find(source) do |path|
+    basename = File.basename(path)
+    if basename == ".DS_Store" || RESIDUAL_DIRS.include?(basename) || RESIDUAL_SUFFIXES.include?(File.extname(path))
+      add_issue(issues, "warning", "source-residual-artifact", "注册真源中存在可清理残留。", path, "确认非必要后清理并更新哈希。")
+    end
+  rescue Errno::ENOENT, Errno::EACCES
+    next
+  end
+end
+
+roots.each do |host, root|
+  each_symlink(root) do |path|
+    add_issue(issues, "error", "broken-symlink", "#{host} Skill 根目录存在悬空软链接。", path, "恢复目标或在确认后移除链接。") unless File.exist?(path)
+  end
+end
+
+real_skill_locations = Hash.new { |hash, key| hash[key] = [] }
+([canonical_root] + roots.values).uniq.each do |root|
+  next unless File.directory?(root)
+  Dir.children(root).sort.each do |child|
+    path = File.join(root, child)
+    next if File.symlink?(path) || !File.directory?(path)
+    next if host_exception_paths[File.expand_path(path)]
+    marker = File.join(path, "SKILL.md")
+    next unless File.file?(marker)
+    begin
+      name = skill_frontmatter(marker)["name"].to_s
+      real_skill_locations[name] << path unless name.empty?
+    rescue StandardError
+      next
+    end
+  end
+end
+real_skill_locations.each do |name, locations|
+  next unless locations.length > 1
+  add_issue(issues, "warning", "duplicate-real-skill", "同名 Skill 存在多个真实目录：#{locations.join(', ')}", locations.first, "先比较内容和宿主归属，不要自动覆盖。")
+end
+
+if File.directory?(options[:temp_root])
+  Dir.glob(File.join(options[:temp_root], "agent-skills-*")).sort.each do |path|
+    add_issue(issues, "warning", "temporary-artifact", "发现 Agent Skill 审计临时目录。", path, "确认不再用于回滚或测试后清理。")
+  end
+end
+
+if options[:codex_checks]
+  begin
+    stdout, stderr, status = Open3.capture3("codex", "app-server", "--strict-config", "--stdio", stdin_data: "")
+    unless status.success?
+      detail = [stdout, stderr].join(" ").strip.gsub(/\s+/, " ")
+      add_issue(issues, "warning", "codex-config-drift", "当前 Codex 严格配置校验失败：#{detail}", File.join(options[:home], ".codex", "config.toml"), "核对字段的当前语义后再决定迁移或删除。")
+    end
+  rescue Errno::ENOENT
+    add_issue(issues, "warning", "codex-cli-missing", "PATH 中找不到 codex，已跳过严格配置校验。")
+  end
+end
+
+severity_order = { "error" => 0, "warning" => 1, "info" => 2 }
+issues.sort_by! { |item| [severity_order.fetch(item["severity"], 9), item["code"], item["path"].to_s] }
+counts = issues.group_by { |item| item["severity"] }.transform_values(&:length)
+summary = {
+  "registry" => registry_path,
+  "managed_skills" => skills.length,
+  "errors" => counts.fetch("error", 0),
+  "warnings" => counts.fetch("warning", 0),
+  "info" => counts.fetch("info", 0)
+}
+
+if options[:format] == "json"
+  puts JSON.pretty_generate({ "summary" => summary, "issues" => issues })
+else
+  puts "# Agent Skills 治理巡检"
+  puts "注册表：#{registry_path}"
+  puts "受管 Skill：#{summary['managed_skills']}"
+  puts "错误：#{summary['errors']}｜警告：#{summary['warnings']}｜信息：#{summary['info']}"
+  if issues.empty?
+    puts "\n未发现治理漂移。巡检未修改任何文件。"
+  else
+    issues.each do |item|
+      puts "\n[#{item['severity'].upcase}] #{item['code']}"
+      puts "- #{item['message']}"
+      puts "- 路径：#{item['path']}" if item["path"]
+      puts "- 建议：#{item['suggestion']}" if item["suggestion"]
+    end
+    puts "\n巡检未修改任何文件；修复前需要用户对具体目标再次确认。"
+  end
+end
+
+exit 1 if options[:strict] && issues.any? { |item| %w[error warning].include?(item["severity"]) }

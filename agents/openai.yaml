@@ -1,0 +1,4 @@
+interface:
+  display_name: "智能体 Skill 治理"
+  short_description: "审计五个智能体的 Skill 真源、断链、重复和注册表漂移"
+  default_prompt: "使用 $agent-skills-governance 对本机五个智能体的 Skill 做一次只读巡检并报告问题。"
