@@ -1,46 +1,46 @@
 ---
 name: agent-skills-governance
-description: Use when a user has Skills across two or more AI agents, wants to initialize or inspect a shared Skill source, reconcile drift or broken entries, safely sync approved Skills, or evaluate a newly installed agent before it joins shared Skill governance.
+description: 当用户有跨两个或更多 AI 智能体的 Skills，需要初始化或检查共享 Skill 真源、修复漂移或断开的条目、安全同步已批准的 Skills，或评估新安装的智能体能否接入共享 Skill 治理时使用。
 ---
 
-# Agent Skills Governance
+# 多智能体 Skill 治理
 
-Treat a shared Skill as an asset with one authority, not a file copied between agents. The public source is normally `~/.agents/skills` (Windows: `%USERPROFILE%\.agents\skills`). Discovery and diagnosis are read-only; no finding authorizes a write.
+把共享 Skill 当作只有唯一权威的资产，而不是在智能体之间复制的文件。公共真源通常位于 `~/.agents/skills`（Windows：`%USERPROFILE%\.agents\skills`）。发现与诊断默认只读；任何发现都不构成写入授权。
 
-## New-user route
+## 新手路径
 
-When the user provides this Skill's path or URL, install it using the current host's native mechanism. Then, for “初始化 / 检查我的 Skill 治理”, read [first-time onboarding](references/onboarding.md) and run the read-only `doctor` command. Present its state card before asking for any registration, link, copy, migration, or cleanup approval.
+当用户提供本 Skill 的路径或仓库地址时，用当前宿主的原生机制安装。随后，对「初始化 / 检查我的 Skill 治理」，先读 [首次上手说明](references/onboarding.md)，并运行只读的 `doctor` 命令。在请求任何注册、链接、复制、迁移或清理的批准之前，先展示它的状态卡。
 
-Use `uv`'s Python if available; otherwise use Python 3.9+ (`python3` on macOS/Linux, `py -3` on Windows). Do not install a runtime without consent.
+优先使用 `uv` 自带的 Python；否则用 Python 3.9+（macOS/Linux 用 `python3`，Windows 用 `py -3`）。未经用户同意不安装运行时。
 
-## Operating model
+## 运营模型
 
-- `direct`: the host declares `direct_source_root`; it must be the public root. Do not create a duplicate host directory.
-- `symlink`: the host entry points to the public source. Prefer it when the host and platform support directory links.
-- `managed_copy`: only for hosts that cannot use links. Copies carry `.agent-skill-source.json` and update atomically.
-- Marketplace, bundled, cache, and project-only Skills are never adopted automatically. One same-named Skill in one host has one authority. A host-owned authority needs a structured exception with its source and reason.
+- `direct`：宿主声明 `direct_source_root`；它必须是公共真源。不要创建重复的宿主目录。
+- `symlink`：宿主入口指向公共真源。宿主和平台支持目录链接时优先使用。
+- `managed_copy`：仅用于无法使用链接的宿主。副本携带 `.agent-skill-source.json` 并原子更新。
+- 市场、内置、缓存和仅项目使用的 Skill 永远不会被自动收编。一个宿主的同名 Skill 只有一个权威。宿主拥有的权威需要带来源和理由的结构化例外。
 
-For the user-facing mental model and conflict decisions, read [the handbook](references/handbook.md). For the Profile format, read [profiles/README.md](profiles/README.md) only when evaluating a new host.
+面向用户的心智模型和冲突决策，读 [手册](references/handbook.md)。Profile 格式仅在评估新宿主时读 [profiles/README.md](profiles/README.md)。
 
-## Commands
+## 命令
 
 ```bash
-# First look: read-only status card with candidates and runtime evidence
+# 第一眼：只读状态卡，含候选与运行时证据
 python3 scripts/governance.py doctor
 
-# Detailed read-only operations
+# 详细只读操作
 python3 scripts/governance.py discover
 python3 scripts/governance.py audit --strict --format json
 
-# Preview; add --apply only after the user confirms exact entries
+# 预览；仅在用户确认精确条目后加 --apply
 python3 scripts/governance.py sync
 python3 scripts/governance.py sync --apply
 ```
 
-New installations use two local files: `~/.agents/governance.json` (hosts, plugin records, canonical root) and `~/.agents/skills.lock.json` (generated Skill hashes). Pass both with `--governance` and `--lock`. The older `~/.agents/skills-registry.json` remains read-compatible; discovery must not overwrite it.
+新安装使用两个本地文件：`~/.agents/governance.json`（宿主、插件记录、公共真源根）和 `~/.agents/skills.lock.json`（生成的 Skill 哈希）。用 `--governance` 和 `--lock` 同时传入。旧的 `~/.agents/skills-registry.json` 保持只读兼容；发现不得覆盖它。
 
-Before `sync --apply`, the core rejects unsafe names, missing `SKILL.md`, invalid frontmatter, source/hash drift, unknown targets, and an invalid direct source. It never replaces an unknown real directory. Cleaning, registration, migration, or a Profile update still needs explicit confirmation.
+在 `sync --apply` 之前，核心拒绝：不安全名称、缺失 `SKILL.md`、非法 frontmatter、真源/哈希漂移、未知目标、非法 direct 源。它绝不替换未知真实目录。清理、登记、迁移或 Profile 更新仍需显式确认。
 
-## Verification
+## 验收
 
-After an approved change, run the smallest relevant test, then `audit --strict`. A valid result has no hash drift, no broken entry, and no unapproved duplicate authority. Do not claim a host is managed merely because an app name or a folder was discovered.
+一次已批准的变更之后，先运行最小相关测试，再跑 `audit --strict`。有效结果必须：无哈希漂移、无断开的入口、无未批准的重复权威。不要仅仅因为发现了一个应用名或文件夹，就声称某个宿主已被治理。
