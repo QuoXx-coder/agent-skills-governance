@@ -15,3 +15,7 @@ htmlcov/
 governance.json
 skills.lock.json
 skills-registry.json
+
+# The distributable starter templates are intentionally versioned.
+!templates/governance.json
+!templates/skills.lock.json
