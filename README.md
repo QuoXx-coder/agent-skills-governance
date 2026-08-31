@@ -7,22 +7,26 @@
 
 ## 快速开始（3 步）
 
-需要 Python 3.9+，零第三方依赖。
+需要 Python 3.9+，零第三方依赖。本地状态放在 `~/.agents/`（Windows：`%USERPROFILE%\.agents\`）。
 
 ```bash
-# 1. 建注册表（discover 必须先有这个文件才能跑）
-cp templates/portable-registry.json ~/.agents/skills-registry.json
+# 1. 建两份本地状态文件（governance.json 声明宿主与公共根，skills.lock.json 记录技能哈希）
+mkdir -p ~/.agents
+cp templates/governance.json ~/.agents/governance.json
+cp templates/skills.lock.json ~/.agents/skills.lock.json
 # Windows PowerShell:
-#   copy templates\portable-registry.json $env:USERPROFILE\.agents\skills-registry.json
+#   mkdir $env:USERPROFILE\.agents
+#   copy templates\governance.json $env:USERPROFILE\.agents\governance.json
+#   copy templates\skills.lock.json $env:USERPROFILE\.agents\skills.lock.json
 
-# 2. 看机器上有哪些疑似宿主（只读，不改任何东西）
-python3 scripts/governance.py discover
+# 2. 一键自检：审计 + 候选发现 + 下一步建议（只读）
+python3 scripts/governance.py doctor --governance ~/.agents/governance.json --lock ~/.agents/skills.lock.json
 
-# 3. 一键自检：审计 + 发现 + 下一步建议（只读）
-python3 scripts/governance.py doctor
+# 3. 看机器上有哪些疑似宿主（只读，候选永远不是已接入宿主）
+python3 scripts/governance.py discover --governance ~/.agents/governance.json --lock ~/.agents/skills.lock.json
 ```
 
-之后把宿主和技能登记进 `~/.agents/skills-registry.json`，再跑 `audit` 检查、`sync` 同步入口。
+之后把宿主登记进 `governance.json`、把技能登记进 `skills.lock.json`，再跑 `audit` 检查、`sync` 同步入口。
 
 ## 命令
 
@@ -34,6 +38,8 @@ python3 scripts/governance.py doctor
 | `sync` | 入口同步计划（默认干跑；`--apply` 才写盘，且先过 preflight） |
 | `hash` | 计算一个真源目录的内容哈希 |
 
+v2 状态由两个文件组成，必须成对传入：`--governance ~/.agents/governance.json --lock ~/.agents/skills.lock.json`。
+旧格式 `~/.agents/skills-registry.json` 保持只读兼容（`--registry`），发现过程不会覆盖它。
 机器可读输出：`doctor` / `audit` 加 `--format json`。
 
 ## 安全边界
@@ -42,12 +48,13 @@ python3 scripts/governance.py doctor
 - `direct` 宿主必须用 `direct_source_root` 指明公共真源
 - `symlink` 首选；Windows 确认无链接权限才回退 `managed_copy`
 - managed_copy 更新走临时目录 + 校验 + 失败回滚；**绝不覆盖未知真实目录**
-- 市场/内置技能归宿主所有；同名冲突登记 host_exception，不互相覆盖
+- 市场/内置技能归宿主所有；同名冲突登记结构化 `host_exception`（kind/source/reason），不互相覆盖
+- 宿主档案（profiles/）只是发现证据，不是登记授权；预置 claude-code / codex 档案，其余按官方文档自行核实
 
 ## 免责声明
 
 本工具按作者自己的机器环境编写和验证（macOS + Claude Code / Codex / Cursor / Qoder / WorkBuddy 布局）。
-其他平台与宿主布局可能需要自行调整注册表里的路径与安装标记。作者不为你的环境负责——本工具是演示级治理，不是替你托管一切的商业软件。
+其他平台与宿主布局可能需要自行调整路径与安装标记。作者不为你的环境负责——本工具是演示级治理，不是替你托管一切的商业软件。
 
 ## 测试
 
