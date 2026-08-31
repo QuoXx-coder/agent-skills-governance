@@ -1,0 +1,4 @@
+interface:
+  display_name: "智能体 Skill 治理"
+  short_description: "初始化、审计和安全同步跨智能体共享 Skill"
+  default_prompt: "使用 $agent-skills-governance 对我的共享 Skill 做一次只读 doctor 检查，并展示下一步建议。"

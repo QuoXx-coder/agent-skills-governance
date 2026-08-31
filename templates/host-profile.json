@@ -1,0 +1,14 @@
+{
+  "profile_version": 1,
+  "id": "example-agent",
+  "official_docs": "https://example.invalid/skills",
+  "verified_at": "YYYY-MM-DD",
+  "platforms": {
+    "windows": {
+      "application_names": ["ExampleAgent"],
+      "candidate_skill_roots": ["AppData/Roaming/ExampleAgent/skills"],
+      "activation_markers": ["AppData/Roaming/ExampleAgent/settings.json"],
+      "entry_modes": ["managed_copy"]
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "profile_version": 1,
+  "id": "claude-code",
+  "official_docs": "https://code.claude.com/docs/en/skills",
+  "verified_at": "2026-08-31",
+  "platforms": {
+    "darwin": {
+      "application_names": ["Claude"],
+      "candidate_skill_roots": [".claude/skills"],
+      "activation_markers": [".claude/settings.json"],
+      "entry_modes": ["symlink", "managed_copy"]
+    },
+    "windows": {
+      "application_names": ["Claude"],
+      "candidate_skill_roots": [".claude/skills"],
+      "activation_markers": [".claude/settings.json"],
+      "entry_modes": ["symlink", "managed_copy"]
+    },
+    "linux": {
+      "application_names": ["Claude"],
+      "candidate_skill_roots": [".claude/skills"],
+      "activation_markers": [".claude/settings.json"],
+      "entry_modes": ["symlink", "managed_copy"]
+    }
+  }
+}

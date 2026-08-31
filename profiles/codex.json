@@ -1,0 +1,14 @@
+{
+  "profile_version": 1,
+  "id": "codex",
+  "official_docs": "https://openai.com/academy/skills/",
+  "verified_at": "2026-08-31",
+  "platforms": {
+    "darwin": {
+      "application_names": ["Codex"],
+      "candidate_skill_roots": [".agents/skills"],
+      "activation_markers": [".codex/config.toml"],
+      "entry_modes": ["direct"]
+    }
+  }
+}

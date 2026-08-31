@@ -1,0 +1,17 @@
+# macOS Finder metadata
+.DS_Store
+
+# Python bytecode and test/runtime caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Local test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# User-specific governance state; templates are tracked instead.
+governance.json
+skills.lock.json
+skills-registry.json
