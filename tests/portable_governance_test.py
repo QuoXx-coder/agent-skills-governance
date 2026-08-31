@@ -116,8 +116,10 @@ class PortableGovernanceTest(unittest.TestCase):
     def test_portable_registry_template_is_valid_json(self):
         template = ROOT / "templates" / "portable-registry.json"
         data = json.loads(template.read_text(encoding="utf-8"))
-        self.assertEqual(data["hosts"], {})
-        self.assertEqual(data["skills"], [])
+        self.assertIsInstance(data["hosts"], dict)
+        self.assertIsInstance(data["skills"], list)
+        self.assertIn("example-agent", data["hosts"])
+        self.assertEqual(data["hosts"]["example-agent"]["platforms"]["darwin"]["entry_mode"], "symlink")
 
     def test_audit_accepts_block_description_frontmatter(self):
         (self.source / "SKILL.md").write_text(

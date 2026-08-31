@@ -1,5 +1,16 @@
 {
-  "hosts": {},
+  "_comment": "起步空壳：先按第 2 节三种入口模式登记宿主（skill_root / entry_mode / installation_markers），再按第 3 节决策树登记技能。下方 example-agent 只是字段形状示例——路径与安装标记必须按你机器上该宿主的官方文档填写，不要照抄。",
+  "hosts": {
+    "example-agent": {
+      "platforms": {
+        "darwin": {
+          "skill_root": "example-agent/skills",
+          "entry_mode": "symlink",
+          "installation_markers": ["example-agent/settings.json"]
+        }
+      }
+    }
+  },
   "host_plugins": {},
   "skills": []
 }

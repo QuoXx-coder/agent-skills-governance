@@ -723,14 +723,15 @@ def doctor(arguments):
     arguments.strict = False
     with contextlib.redirect_stdout(audit_stream):
         audit(arguments)
-    arguments.format = original_format
-    arguments.strict = original_strict
     audit_report = json.loads(audit_stream.getvalue())
 
     discovery_stream = io.StringIO()
     with contextlib.redirect_stdout(discovery_stream):
         discover(arguments)
     discovery_report = json.loads(discovery_stream.getvalue())
+
+    arguments.format = original_format
+    arguments.strict = original_strict
     summary = audit_report["summary"]
     next_step = "fix_errors" if summary["errors"] else "review_warnings" if summary["warnings"] else "healthy"
     report = {

@@ -1,69 +1,62 @@
-# Agent Skills Governance
+# Agent Skills Governance — 多智能体 Skill 治理工具
 
-Give every shared Skill one home, then let each verified agent use a managed entry. This package is for people using two or more AI agents and who need to avoid copied, drifting, or conflicting Skills.
+把每一份共享 Skill 放回唯一的家（真源），让每个已接入的 Agent 都通过受管入口读到它。
+解决多 Agent（Claude Code / Codex / Cursor / Qoder / WorkBuddy…）之间技能复制、漂移、同名冲突的问题。
 
-## First use
+> 配套方法论见《多智能体 Skill 治理手册》：真源 vs 副本、三种入口模式、四张决策树。
 
-Give this folder or repository URL to your current AI agent and say:
+## 快速开始（3 步）
 
-> Install this Skill, then initialize my Skill governance.
-
-The agent should use its native installation mechanism, run a read-only diagnosis, and show a plan before creating a public directory, registering a host, creating links, or cleaning files.
+需要 Python 3.9+，零第三方依赖。
 
 ```bash
-# macOS / Linux
+# 1. 建注册表（discover 必须先有这个文件才能跑）
+cp templates/portable-registry.json ~/.agents/skills-registry.json
+# Windows PowerShell:
+#   copy templates\portable-registry.json $env:USERPROFILE\.agents\skills-registry.json
+
+# 2. 看机器上有哪些疑似宿主（只读，不改任何东西）
+python3 scripts/governance.py discover
+
+# 3. 一键自检：审计 + 发现 + 下一步建议（只读）
 python3 scripts/governance.py doctor
-
-# Windows PowerShell
-py -3 scripts\governance.py doctor --platform windows
 ```
 
-The core needs Python 3.9+ and has no third-party runtime dependency. Prefer `uv` when present. `doctor` reports the Python runtime, managed state, errors/warnings, and unverified host candidates without making filesystem changes.
+之后把宿主和技能登记进 `~/.agents/skills-registry.json`，再跑 `audit` 检查、`sync` 同步入口。
 
-## Local state
+## 命令
 
-For a new installation, keep machine-specific state under `~/.agents/` (Windows: `%USERPROFILE%\.agents\`):
-
-```text
-.agents/
-├── skills/              public shared source
-├── governance.json      schema v2: hosts, plugins, canonical source root
-├── skills.lock.json     schema v1: generated Skill names and hashes
-└── profiles/            user-confirmed Host Profile updates
-```
-
-Start from [governance.json](templates/governance.json) and [skills.lock.json](templates/skills.lock.json). The old [portable-registry.json](templates/portable-registry.json) remains only for legacy read compatibility; it is not the starting point for a new machine.
-
-## Commands
-
-| Command | Effect |
+| 命令 | 作用 |
 | --- | --- |
-| `doctor` | Read-only state card: audit, candidates, and runtime. |
-| `discover` | Read-only candidate discovery; a candidate is never an approved host. |
-| `audit` | Read-only check of hashes, frontmatter, entries, residuals, and conflicts. |
-| `sync` | Dry-run entry plan. `--apply` writes only after preflight succeeds. |
-| `hash` | Print the content hash for a source directory. |
+| `doctor` | 一键自检：审计 + 候选发现 + 运行时信息（只读） |
+| `discover` | 候选宿主发现（只读），候选永远不等于已接入宿主 |
+| `audit` | 检查哈希、frontmatter、入口、残留、冲突（只读） |
+| `sync` | 入口同步计划（默认干跑；`--apply` 才写盘，且先过 preflight） |
+| `hash` | 计算一个真源目录的内容哈希 |
 
-Use `--format json` with `doctor` or `audit` for stable machine output. A v2 state must pass both `--governance ~/.agents/governance.json` and `--lock ~/.agents/skills.lock.json`; the pair is intentionally required.
+机器可读输出：`doctor` / `audit` 加 `--format json`。
 
-## Safety properties
+## 安全边界
 
-- `sync --apply` refuses unsafe Skill names, missing `SKILL.md`, invalid frontmatter, hash drift, unknown target hosts, and invalid direct sources.
-- A `direct` host must name the public root with `direct_source_root`.
-- `symlink` is preferred; Windows falls back to `managed_copy` only after link capability has been checked.
-- Managed-copy updates stage a random temporary directory, validate it, and roll back a managed old copy on failure. Unknown directories are never replaced.
-- Marketplace and built-in Skills remain host-owned. Do not synchronize over a same-named host capability; record a structured exception instead.
+- `sync --apply` 拒绝：非法名称、缺 SKILL.md、frontmatter 非法、哈希漂移、未登记宿主、非法 direct 源
+- `direct` 宿主必须用 `direct_source_root` 指明公共真源
+- `symlink` 首选；Windows 确认无链接权限才回退 `managed_copy`
+- managed_copy 更新走临时目录 + 校验 + 失败回滚；**绝不覆盖未知真实目录**
+- 市场/内置技能归宿主所有；同名冲突登记 host_exception，不互相覆盖
 
-Read [the handbook](references/handbook.md) for the decision model. Built-in and user-supplied discovery evidence is documented in [profiles/README.md](profiles/README.md); `~/.agents/profiles/` loads automatically and `--profiles-dir` adds an extra review directory.
+## 免责声明
 
-## Tests
+本工具按作者自己的机器环境编写和验证（macOS + Claude Code / Codex / Cursor / Qoder / WorkBuddy 布局）。
+其他平台与宿主布局可能需要自行调整注册表里的路径与安装标记。作者不为你的环境负责——本工具是演示级治理，不是替你托管一切的商业软件。
+
+## 测试
 
 ```bash
 python3 tests/portable_governance_test.py
 ```
 
-The test suite covers Linux/macOS-style links, Windows managed copies, v2 direct readers, Profile-based candidate discovery, and preflight rejection of unsafe writes.
+覆盖 Linux/macOS 软链接、Windows managed_copy、v2 direct、Profile 候选发现、preflight 拒绝不安全写入。
 
 ## License
 
-[MIT](LICENSE)
+MIT
