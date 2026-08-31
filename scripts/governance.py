@@ -296,6 +296,8 @@ def report_duplicate_real_skills(skills, hosts, canonical_root, issues):
         for path in root.iterdir():
             if path.is_symlink() or not path.is_dir() or path.resolve() in exception_paths:
                 continue
+            if (path / MANAGED_COPY_MARKER).is_file():
+                continue
             marker = path / "SKILL.md"
             if not marker.is_file():
                 continue

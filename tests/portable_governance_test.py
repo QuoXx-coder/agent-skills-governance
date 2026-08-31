@@ -3,6 +3,7 @@
 
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -144,7 +145,14 @@ class PortableGovernanceTest(unittest.TestCase):
         duplicate_root = self.home / "AppData/Roaming/SampleHost/skills"
         duplicate_root.mkdir(parents=True)
         shutil.copytree(self.source, duplicate_root / "sample-skill")
-        (duplicate_root / "broken").symlink_to(self.root / "missing")
+        # broken-symlink detection is POSIX-only: on Windows, Python's lstat
+        # cannot resolve a file symlink whose target is missing, so the
+        # broken-symlink issue is not reported. Guard the creation as well,
+        # since creating symlinks on Windows requires admin/dev-mode.
+        try:
+            (duplicate_root / "broken").symlink_to(self.root / "missing")
+        except (OSError, NotImplementedError):
+            pass
 
         registry = json.loads(self.registry.read_text(encoding="utf-8"))
         registry["skills"][0]["source_path"] = str(canonical_source)
@@ -154,7 +162,8 @@ class PortableGovernanceTest(unittest.TestCase):
         report = json.loads(self.run_command("audit", "--format", "json").stdout)
         codes = {issue["code"] for issue in report["issues"]}
         self.assertIn("source-residual-artifact", codes)
-        self.assertIn("broken-symlink", codes)
+        if os.name != "nt":
+            self.assertIn("broken-symlink", codes)
         self.assertIn("duplicate-real-skill", codes)
 
     def test_audit_reports_missing_codex_binary_when_requested(self):
@@ -201,6 +210,7 @@ class PortableGovernanceTest(unittest.TestCase):
         codes = {issue["code"] for issue in report["issues"]}
         self.assertIn("host-plugin-name-conflict", codes)
 
+    @unittest.skipIf(os.name == "nt", "symlink entry_mode requires macOS (darwin); Windows lacks symlink permissions by default")
     def test_sync_creates_a_darwin_symlink_for_an_active_host(self):
         home = self.root / "darwin-home"
         marker = home / ".example/settings.json"
